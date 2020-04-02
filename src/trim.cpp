@@ -14,8 +14,10 @@
 #include <3rdparty/htslib/sam.h>
 #include "artic.h"
 #include "htslib/sam.h"
+#include "common.h"
 
 std::set<std::string> pools;
+
 
 static inline void strtok_null_check(char *tmp, int line_num){
     // TODO: the file no is passed. have to change
@@ -196,57 +198,185 @@ std::vector<bed_row> read_bed_file(const char *bed_file_name) {
     return bed_file;
 }
 
-int main(int argc, char ** argv){
-//    std::vector<bed_row> bed_file = read_bed_file("nCoV-2019.bed");
-
-    samFile *fp_in = hts_open("samtools.bam","r"); //open bam file
-    bam_hdr_t *bamHdr = sam_hdr_read(fp_in); //read header
-    bam1_t *aln = bam_init1(); //initialize an alignment
-
-    char *chrom = "chr22";
-    int locus = 0;
-    int comp ;
-
-    printf("%s\t%d\n", chrom, locus);
-
-    //header parse
-    //uint32_t *tar = bamHdr->text ;
-    //uint32_t *tarlen = bamHdr->target_len ;
-
-    //printf("%d\n",tar);
-
-    while(sam_read1(fp_in,bamHdr,aln) > 0){
-
-        int32_t pos = aln->core.pos +1; //left most position of alignment in zero based coordianate (+1)
-        char *chr = bamHdr->target_name[aln->core.tid] ; //contig name (chromosome)
-        uint32_t len = aln->core.l_qseq; //length of the read.
-
-        uint8_t *q = bam_get_seq(aln); //quality string
-        uint32_t q2 = aln->core.qual ; //mapping quality
-
-
-        char *qseq = (char *)malloc(len);
-
-        for(int i=0; i< len ; i++){
-            qseq[i] = seq_nt16_str[bam_seqi(q,i)]; //gets nucleotide id and converts them into IUPAC id.
-        }
-
-        //printf("%s\t%d\t%d\t%s\t%s\t%d\n",chr,pos,len,qseq,q,q2);
-
-        if(strcmp(chrom, chr) == 0){
-
-            if(locus > pos+len){
-                printf("%s\t%d\t%d\t%s\t%s\t%d\n",chr,pos,len,qseq,q,q2);
+int find_primer(std::vector<bed_row> bed, int pos, int direction) {
+    int min_distance = INT32_MAX;
+    size_t index = 0;
+    int i = 0;
+    for(auto it=bed.begin();it!=bed.end();++it){
+        if(it->direction_sign == direction && direction == 1){
+            if(abs(it->start-pos)<min_distance){
+                min_distance = abs(it->start-pos);
+                index = i;
             }
+        }
+        if(it->direction_sign == direction && direction == -1){
+            if(abs(it->end-pos)<min_distance){
+                min_distance = abs(it->end-pos);
+                index = i;
+            }
+        }
+        i++;
+    }
+    return index;
+}
+
+int trim(alignedRead *read, int start_pos, int end) {
+    int pos;
+    if(end==0){
+        pos = read->pos;
+    } else{
+        pos = read->end;
+    }
+    int eaten = 0;
+    int index = -1;
+    if(end == 1){
+        index = read->cigarLen;
+    }
+    while(1){
+        uint32_t flag;
+        uint32_t length;
+        // chomp stuff until we reach pos
+        if(end == 1){
+            index--;
+        }else{
+            index++;
+        }
+        flag = read->cigarOps[2*index];
+        length = read->cigarOps[2*index + 1];
+        if(flag == 0){
+            // match
+            eaten += length;
+            if(end == 0){
+                pos += length;
+            } else{
+                pos -= length;
+            }
+        }
+        if(flag == 1){
+            // insertion to the ref
+            eaten += length;
+        }
+        if(flag == 2){
+            // deletion to the ref
+            if(end == 0){
+                pos += length;
+            }else{
+                pos -= length;
+            }
+        }
+        if(flag == 4){
+            eaten += length;
+        }
+        if(end == 0 and pos >= start_pos and flag == 0){
+            break;
+        }
+        if(end == 1 and pos <= start_pos and flag == 0){
+            break;
         }
     }
 
-    bam_destroy1(aln);
-    sam_close(fp_in);
+    int extra = abs(pos-start_pos);
+    
+
+    return 0;
+}
+
+int main(int argc, char ** argv){
+    // args flags
+    int REMOVE_INCORRECT_PAIRS = 1;
+    int START = 1;
+
+    char * samfile = "samtools.bam";
+    std::vector<bed_row> bed = read_bed_file("nCoV-2019.bed");
+
+    //these come from htslib/sam.h
+    samFile *in = NULL;
+    bam1_t *b= NULL;
+    bam_hdr_t *header = NULL;
+
+    //open the BAM file (though called sam_open is opens bam files too :P)
+    in = sam_open(samfile, "r");
+    if(in == nullptr){
+        fprintf(stderr,"could not open file %s",samfile);
+    }
+
+    //get the sam header.
+    if ((header = sam_hdr_read(in)) == 0){
+        fprintf(stderr,"No sam header?\n");
+        exit(EXIT_FAILURE);
+    }
+
+    //print the chromosome names in the header
+    //see the bam_hdr_t struct in htslib/sam.h for parsing the rest of the stuff in header
+    int i;
+    for(i=0; i< (header->n_targets); i++){
+        printf("Chromosome ID %d = %s\n",i,(header->target_name[i]));
+    }
+
+    b = bam_init1();
+
+    //my structure for a read (see common.h)
+    struct alignedRead* read = (struct alignedRead*)malloc(sizeof(struct alignedRead));
+
+    //repeat until all reads in the file are retrieved
+    while ( sam_read1(in, header, b) >= 0){
+        getRead(read, b);         //copy the current read to the myread structure. See common.c for information
+        if(read->flag & BAM_FUNMAP == 0){
+            fprintf(stderr,"%s read is skipped because it is unmapped",read->qname);
+            continue;
+        }
+        if(read->flag & BAM_FSUPPLEMENTARY == 0){
+            fprintf(stderr,"%s read is skipped because it is supplementary",read->qname);
+            continue;
+        }
+        int p1 = find_primer(bed,read->pos,1);
+        int p2 = find_primer(bed,read->end,-1);
+
+        char* primer_left = strdup(bed[p1].Primer_ID);
+        char * p = strstr(primer_left,"LEFT");
+        *p = '\0';
+
+        char* primer_right = strdup(bed[p2].Primer_ID);
+        p = strstr(primer_right,"RIGHT");
+        *p = '\0';
+        int is_correctly_paired = strcmp(primer_left,primer_right); // return 0 if correctly paired
+
+        if(REMOVE_INCORRECT_PAIRS==1 and is_correctly_paired!=0){
+            continue;
+        }
+        //report
+//        fprintf(stderr,"%s\t%s\t%s\t%s_%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d",read->qname,read->pos,read->end,bed[p1].Primer_ID,bed[p2].Primer_ID,)
+
+        // if the alignment starts before the end of the primer, trim to that position
+        int primer_position;
+        if(START){
+            primer_position = bed[p1].start;
+        } else{
+            primer_position = bed[p1].end;
+        }
+
+        if(read->pos < primer_position){
+            int trim_success = trim(read,primer_position,0);
+            if(!trim_success){
+                continue;
+            }
+        }
+
+
+//        printRead(myread,header);   //print data in  myread structure. See common.c for information
+    }
+
+
+    //wrap up
+    free(myread);
+    bam_destroy1(b);
+    bam_hdr_destroy(header);
+    sam_close(in);
+
 
     return 0;
 
-    std::cout << "hello world" << std::endl;
+//    std::cout << "hello world" << std::endl;
 
 
 }

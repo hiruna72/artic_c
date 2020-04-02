@@ -1,3 +1,0 @@
-/media/shan/OS/Hiruna/FYP/artic_c/cmake-build-debug/CMakeFiles/rebuild_cache.dir
-/media/shan/OS/Hiruna/FYP/artic_c/cmake-build-debug/CMakeFiles/artic_c.dir
-/media/shan/OS/Hiruna/FYP/artic_c/cmake-build-debug/CMakeFiles/edit_cache.dir

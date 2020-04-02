@@ -34,10 +34,11 @@ file(COPY test_files/samtools.bam
 		DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 set(trim src/trim.cpp)
+set(common src/common.cpp)
 
 
 # Build a shared lib
-add_executable(artic_c ${trim})
+add_executable(artic_c ${common} ${trim})
 
 # htslib dependency
 set (htslib_shared "${PROJECT_SOURCE_DIR}/3rdparty/${DEPLOY_PLATFORM}/libhts.so")
