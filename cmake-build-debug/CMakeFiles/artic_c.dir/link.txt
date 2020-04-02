@@ -1,0 +1,1 @@
+/usr/bin/c++   -g -rdynamic -Wall -O2 -std=c++11  -g   CMakeFiles/artic_c.dir/src/trim.cpp.o  -o artic_c -Wl,-rpath,/media/shan/OS/Hiruna/FYP/artic_c/3rdparty/x86 -lz -ldl -lm -lpthread ../3rdparty/x86/libhts.so 
