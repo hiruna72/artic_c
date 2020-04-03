@@ -8,8 +8,8 @@
 // bed file values
 typedef struct {
     char* chromosome;
-    int start;
-    int end;
+    uint32_t start;
+    uint32_t end;
     char* Primer_ID;
     char* PoolName;
     char* direction;

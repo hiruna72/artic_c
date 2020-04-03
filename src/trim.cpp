@@ -11,6 +11,7 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <algorithm>
 #include <3rdparty/htslib/sam.h>
 #include "artic.h"
 #include "htslib/sam.h"
@@ -198,20 +199,22 @@ std::vector<bed_row> read_bed_file(const char *bed_file_name) {
     return bed_file;
 }
 
-int find_primer(std::vector<bed_row> bed, int pos, int direction) {
-    int min_distance = INT32_MAX;
+int find_primer(std::vector<bed_row> bed, uint32_t pos, int direction) {
+    uint32_t min_distance = INT32_MAX;
     size_t index = 0;
     int i = 0;
     for(auto it=bed.begin();it!=bed.end();++it){
-        if(it->direction_sign == direction && direction == 1){
-            if(abs(it->start-pos)<min_distance){
-                min_distance = abs(it->start-pos);
+        if(it->direction_sign == direction and direction == 1){
+            uint32_t distance = (it->start > pos) ? it->start - pos : pos - it->start;
+            if(distance < min_distance){
+                min_distance = distance;
                 index = i;
             }
         }
-        if(it->direction_sign == direction && direction == -1){
-            if(abs(it->end-pos)<min_distance){
-                min_distance = abs(it->end-pos);
+        if(it->direction_sign == direction and direction == -1){
+            uint32_t distance = (it->end > pos)? it->end - pos : pos - it->end;
+            if( distance < min_distance){
+                min_distance = distance;
                 index = i;
             }
         }
@@ -220,29 +223,36 @@ int find_primer(std::vector<bed_row> bed, int pos, int direction) {
     return index;
 }
 
-int trim(alignedRead *read, int start_pos, int end) {
+int trim(std::vector<uint32_t>*cigar,alignedRead *read, int start_pos, int end) {
     int pos;
     if(end==0){
         pos = read->pos;
+        std::reverse(cigar->begin(),cigar->end()); // now it is easy to pop and append
     } else{
         pos = read->end;
     }
+//    fprintf(stderr,"pos = %d\n",pos);
     int eaten = 0;
-    int index = -1;
-    if(end == 1){
-        index = read->cigarLen;
-    }
+
+//    fprintf(stderr,"before while.... in read %s\n",read->qname);
+    int iter = 0;
     while(1){
+        iter++;
         uint32_t flag;
         uint32_t length;
         // chomp stuff until we reach pos
-        if(end == 1){
-            index--;
+        if(end){
+            length = cigar->back();
+            cigar->pop_back();
+            flag = cigar->back();
+            cigar->pop_back();
         }else{
-            index++;
+            flag = cigar->back();
+            cigar->pop_back();
+            length = cigar->back();
+            cigar->pop_back();
         }
-        flag = read->cigarOps[2*index];
-        length = read->cigarOps[2*index + 1];
+//        fprintf(stderr,"flag = %d length = %d\n",flag,length);
         if(flag == 0){
             // match
             eaten += length;
@@ -274,32 +284,76 @@ int trim(alignedRead *read, int start_pos, int end) {
             break;
         }
     }
-
+//    fprintf(stderr,"after while.... in read %s iterations %d\n",read->qname,iter);
     int extra = abs(pos-start_pos);
-    
+    if(extra){
+        // if flag ==0 // this is always true
+        cigar->push_back(0);
+        cigar->push_back(extra);
+        eaten -= extra;
+    }
+    if(end==0){
+        read->pos = pos - extra;
+    }
+    if(end==0 and cigar->end()[-2]==2){
+        std::reverse(cigar->begin(),cigar->end()); // reverse cigar again
+        return 0;
+    }
 
+    if(end){
+        cigar->push_back(4);
+        cigar->push_back(eaten);
+    }else{
+        cigar->push_back(eaten);
+        cigar->push_back(4);
+    }
+
+    // reverse cigar again
+    if(end==0){
+        std::reverse(cigar->begin(),cigar->end());
+    }
+//    fprintf(stderr,"before returning\n");
+    return 1;
+}
+
+int check_still_matching_bases(alignedRead *read) {
+    for (auto i=0 ;i < read->cigarLen; i++){
+        if(read->cigarOps[2*i] == 0){
+            return 1;
+        }
+    }
     return 0;
 }
 
+/////////////////////////////////////////////////////////////////////MAIN//////////////////////////////////////////////////
+
 int main(int argc, char ** argv){
     // args flags
-    int REMOVE_INCORRECT_PAIRS = 1;
-    int START = 1;
+    int ARGS_REMOVE_INCORRECT_PAIRS = 1;
+    int ARGS_START = 1;
+    int ARGS_VERBORSE = 1;
+    int ARGS_NORMALISE = 200;
+    char* ARGS_SAMFILE_IN = "SP1-mapped.bam";
+    char* ARGS_SAMFILE_OUT = "trimmed.bam";
+    char* ARGS_BEDFILE = "nCoV-2019.bed";
 
-    char * samfile = "samtools.bam";
-    std::vector<bed_row> bed = read_bed_file("nCoV-2019.bed");
+    std::vector<bed_row> bed = read_bed_file(ARGS_BEDFILE);
 
     //these come from htslib/sam.h
     samFile *in = NULL;
+    samFile *out = NULL;
     bam1_t *b= NULL;
     bam_hdr_t *header = NULL;
 
     //open the BAM file (though called sam_open is opens bam files too :P)
-    in = sam_open(samfile, "r");
+    in = sam_open(ARGS_SAMFILE_IN, "r");
     if(in == nullptr){
-        fprintf(stderr,"could not open file %s",samfile);
+        fprintf(stderr,"could not open file %s",ARGS_SAMFILE_IN);
     }
-
+    out = sam_open(ARGS_SAMFILE_OUT, "w");      //for writing
+    if(in == nullptr){
+        fprintf(stderr,"could not open file %s",ARGS_SAMFILE_OUT);
+    }
     //get the sam header.
     if ((header = sam_hdr_read(in)) == 0){
         fprintf(stderr,"No sam header?\n");
@@ -318,19 +372,26 @@ int main(int argc, char ** argv){
     //my structure for a read (see common.h)
     struct alignedRead* read = (struct alignedRead*)malloc(sizeof(struct alignedRead));
 
+    std::map<std::string,int[2]>counter;
+
+    FILE* fout = fopen("read_names.txt","w");
+
     //repeat until all reads in the file are retrieved
     while ( sam_read1(in, header, b) >= 0){
         getRead(read, b);         //copy the current read to the myread structure. See common.c for information
-        if(read->flag & BAM_FUNMAP == 0){
-            fprintf(stderr,"%s read is skipped because it is unmapped",read->qname);
+//        fprintf(fout,"%s\t%d\t%d\n",read->qname,read->cigarLen, sizeof(read->cigarOps)/ sizeof(uint32_t));
+//        continue;
+        if(read->flag & BAM_FUNMAP){
+//            fprintf(stderr,"%s read is skipped because it is unmapped\n",read->qname);
             continue;
         }
-        if(read->flag & BAM_FSUPPLEMENTARY == 0){
-            fprintf(stderr,"%s read is skipped because it is supplementary",read->qname);
+        if(read->flag & BAM_FSUPPLEMENTARY){
+//            fprintf(stderr,"%s read is skipped because it is supplementary\n",read->qname);
             continue;
         }
         int p1 = find_primer(bed,read->pos,1);
         int p2 = find_primer(bed,read->end,-1);
+
 
         char* primer_left = strdup(bed[p1].Primer_ID);
         char * p = strstr(primer_left,"LEFT");
@@ -341,42 +402,91 @@ int main(int argc, char ** argv){
         *p = '\0';
         int is_correctly_paired = strcmp(primer_left,primer_right); // return 0 if correctly paired
 
-        if(REMOVE_INCORRECT_PAIRS==1 and is_correctly_paired!=0){
+        if(ARGS_REMOVE_INCORRECT_PAIRS==1 and is_correctly_paired!=0){
+            fprintf(fout,"%s\t%d\t%d\n",read->qname,read->cigarLen, sizeof(read->cigarOps)/ sizeof(uint32_t));
             continue;
         }
+        std::vector<uint32_t> cigar(read->cigarOps, read->cigarOps + 2*read->cigarLen );
         //report
 //        fprintf(stderr,"%s\t%s\t%s\t%s_%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d",read->qname,read->pos,read->end,bed[p1].Primer_ID,bed[p2].Primer_ID,)
 
         // if the alignment starts before the end of the primer, trim to that position
-        int primer_position;
-        if(START){
+        uint32_t primer_position;
+        if(ARGS_START){
             primer_position = bed[p1].start;
         } else{
             primer_position = bed[p1].end;
         }
-
+//        fprintf(stderr,"%s\t%d\t%d\t%d\t%d\n",read->qname,read->cigarLen, read->pos,primer_position,read->end);
+        int both = 0;
         if(read->pos < primer_position){
-            int trim_success = trim(read,primer_position,0);
-            if(!trim_success){
+            fprintf(stderr,"%s\t%d\t%d\t%d\n",read->qname,read->cigarLen, read->pos,primer_position);
+            int trim_success = trim(&cigar, read, primer_position, 0);
+//            break;
+            both = 1;
+            if(trim_success == 0){
+                continue;
+            }
+        }
+        else{
+            if(ARGS_VERBORSE == 1){
+//                fprintf(stderr,"ref end %d >= primer_position %d\n",read->end,primer_position);
+            }
+        }
+
+        if(ARGS_START){
+            primer_position = bed[p2].end;
+        } else{
+            primer_position = bed[p2].start;
+        }
+        if(read->end > primer_position){
+            trim(&cigar,read, primer_position, 1);
+            both = 2;
+        }
+//        if(both == 2){
+//            fprintf(stderr,"doing two trims for a single record?");
+//        }
+        else{
+            if(ARGS_VERBORSE){
+//                fprintf(stderr,"ref end %d >= primer_position %d\n",read->end,primer_position);
+            }
+        }
+
+        // todo: exception handle
+        if(ARGS_NORMALISE){
+            char key[100];
+            strcpy (key,bed[p1].Primer_ID);
+            strcat(key,bed[p2].Primer_ID);
+            int index = (read->flag & BAM_FREVERSE) ? 1:0;
+            counter[key][index]++;
+//            fprintf(stderr,"bitwise op done. key=%s index= %d counter=%d\n",key,index,counter[key][index]);
+            if(counter[key][index] > ARGS_NORMALISE){
                 continue;
             }
         }
 
+        if(check_still_matching_bases(read)==0){
+            continue;
+        }
 
-//        printRead(myread,header);   //print data in  myread structure. See common.c for information
+        // write back to b
+        // we only have to update cigar in b with std::vector<> cigar
+
+
     }
 
+    fclose(fout);
 
     //wrap up
-    free(myread);
+    free(read);
     bam_destroy1(b);
     bam_hdr_destroy(header);
     sam_close(in);
 
+    std::cout << "hello world" << std::endl;
 
     return 0;
 
-//    std::cout << "hello world" << std::endl;
 
 
 }
