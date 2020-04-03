@@ -471,7 +471,19 @@ int main(int argc, char ** argv){
 
         // write back to b
         // we only have to update cigar in b with std::vector<> cigar
+        uint32_t *cigar_ptr = bam_get_cigar(b);
+        uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*cigar.size());
 
+        for(auto it = cigar.begin(); it != cigar.end(); ++it) {
+            uint32_t mask = 0x0f;
+            uint32_t flag = *it;
+            ++it;
+            uint32_t length = *it;
+            length << BAM_CIGAR_SHIFT;
+            *new_cigar_ptr = length | flag;
+            new_cigar_ptr++;
+        }
+        b->core.n_cigar = cigar.size();
 
     }
 
