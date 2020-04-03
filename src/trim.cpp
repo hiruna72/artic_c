@@ -347,18 +347,20 @@ int main(int argc, char ** argv){
 
     //open the BAM file (though called sam_open is opens bam files too :P)
     in = sam_open(ARGS_SAMFILE_IN, "r");
-    if(in == nullptr){
-        fprintf(stderr,"could not open file %s",ARGS_SAMFILE_IN);
-    }
+    errorCheckNULL(in);
+
     out = sam_open(ARGS_SAMFILE_OUT, "w");      //for writing
-    if(in == nullptr){
-        fprintf(stderr,"could not open file %s",ARGS_SAMFILE_OUT);
-    }
+    errorCheckNULL(out);
+
     //get the sam header.
     if ((header = sam_hdr_read(in)) == 0){
         fprintf(stderr,"No sam header?\n");
         exit(EXIT_FAILURE);
     }
+
+    //write the SAM header
+    int ret=sam_hdr_write(out,header);
+    errorCheck(ret);
 
     //print the chromosome names in the header
     //see the bam_hdr_t struct in htslib/sam.h for parsing the rest of the stuff in header
@@ -420,7 +422,6 @@ int main(int argc, char ** argv){
 //        fprintf(stderr,"%s\t%d\t%d\t%d\t%d\n",read->qname,read->cigarLen, read->pos,primer_position,read->end);
         int both = 0;
         if(read->pos < primer_position){
-            fprintf(stderr,"%s\t%d\t%d\t%d\n",read->qname,read->cigarLen, read->pos,primer_position);
             int trim_success = trim(&cigar, read, primer_position, 0);
 //            break;
             both = 1;
@@ -475,15 +476,19 @@ int main(int argc, char ** argv){
         uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*cigar.size());
 
         for(auto it = cigar.begin(); it != cigar.end(); ++it) {
-            uint32_t mask = 0x0f;
             uint32_t flag = *it;
             ++it;
             uint32_t length = *it;
-            length << BAM_CIGAR_SHIFT;
-            *new_cigar_ptr = length | flag;
+            length = length << BAM_CIGAR_SHIFT;
+            *new_cigar_ptr = (length | flag);
+//            fprintf(stderr,"flag = %d length = %d new value = %d\n",flag,*it,*new_cigar_ptr);
             new_cigar_ptr++;
         }
-        b->core.n_cigar = cigar.size();
+        b->core.n_cigar = cigar.size(); // cause error >> E::sam_format1_append] Corrupted aux data for read 20a4e805-b12b-410a-8cdf-d4d0046187dc
+
+        ret=sam_write1(out,header,b);
+        errorCheck(ret);
+//        free(new_cigar_ptr);
 
     }
 
@@ -494,6 +499,7 @@ int main(int argc, char ** argv){
     bam_destroy1(b);
     bam_hdr_destroy(header);
     sam_close(in);
+    sam_close(out);
 
     std::cout << "hello world" << std::endl;
 
