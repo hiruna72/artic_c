@@ -333,7 +333,7 @@ int main(int argc, char ** argv){
     int ARGS_START = 1;
     int ARGS_VERBORSE = 1;
     int ARGS_NORMALISE = 200;
-    char* ARGS_SAMFILE_IN = "SP1-mapped.bam";
+    char* ARGS_SAMFILE_IN = "samtools.bam";
     char* ARGS_SAMFILE_OUT = "trimmed.bam";
     char* ARGS_BEDFILE = "nCoV-2019.bed";
 
@@ -475,6 +475,7 @@ int main(int argc, char ** argv){
         uint32_t *cigar_ptr = bam_get_cigar(b);
         uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*cigar.size());
 
+        uint32_t new_cigar_len=0;
         for(auto it = cigar.begin(); it != cigar.end(); ++it) {
             uint32_t flag = *it;
             ++it;
@@ -483,8 +484,27 @@ int main(int argc, char ** argv){
             *new_cigar_ptr = (length | flag);
 //            fprintf(stderr,"flag = %d length = %d new value = %d\n",flag,*it,*new_cigar_ptr);
             new_cigar_ptr++;
+            new_cigar_len++;
         }
-        b->core.n_cigar = cigar.size(); // cause error >> E::sam_format1_append] Corrupted aux data for read 20a4e805-b12b-410a-8cdf-d4d0046187dc
+        //b->core.n_cigar = cigar.size(); // cause error >> E::sam_format1_append] Corrupted aux data for read 20a4e805-b12b-410a-8cdf-d4d0046187dc
+        fprintf(stderr,"l_data %d m_data %d l_qname+n_cigar+l_qseq+l_extranul %d\n",b->l_data, b->m_data,b->core.l_qname+b->core.n_cigar+b->core.l_qseq+b->core.l_extranul);
+        fprintf(stderr,"oldcigar %d newcigar %d\n",b->core.n_cigar, new_cigar_len);
+        assert(new_cigar_len<=b->core.n_cigar);
+    // update b
+       
+        uint32_t l= new_cigar_len;
+        uint32_t *cigar2 = bam_get_cigar(b);
+        uint8_t *seq, *qual, *pointer;
+        seq = bam_get_seq(b); qual = bam_get_qual(b);
+        int j = b->core.l_qseq;
+
+        memcpy(cigar2, cigar_ptr, l * 4); // set CIGAR
+        pointer = b->data + b->core.l_qname + l * 4;
+        memmove(pointer, seq, (j+1)>>1); pointer += (j+1)>>1; // set SEQ
+        memmove(pointer, qual, j); pointer += j; // set QUAL
+        memmove(pointer, bam_get_aux(b), bam_get_l_aux(b)); pointer += bam_get_l_aux(b); // set optional fields
+        b->core.n_cigar = l, b->core.l_qseq = j; // update CIGAR length and query length
+        b->l_data = pointer - b->data; // update record length
 
         ret=sam_write1(out,header,b);
         errorCheck(ret);
