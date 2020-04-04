@@ -420,11 +420,9 @@ int main(int argc, char ** argv){
             primer_position = bed[p1].end;
         }
 //        fprintf(stderr,"%s\t%d\t%d\t%d\t%d\n",read->qname,read->cigarLen, read->pos,primer_position,read->end);
-        int both = 0;
         if(read->pos < primer_position){
             int trim_success = trim(&cigar, read, primer_position, 0);
 //            break;
-            both = 1;
             if(trim_success == 0){
                 continue;
             }
@@ -441,12 +439,10 @@ int main(int argc, char ** argv){
             primer_position = bed[p2].start;
         }
         if(read->end > primer_position){
+            std::vector<uint32_t> cigar2(read->cigarOps, read->cigarOps + 2*read->cigarLen );
+            cigar = cigar2;
             trim(&cigar,read, primer_position, 1);
-            both = 2;
         }
-//        if(both == 2){
-//            fprintf(stderr,"doing two trims for a single record?");
-//        }
         else{
             if(ARGS_VERBORSE){
 //                fprintf(stderr,"ref end %d >= primer_position %d\n",read->end,primer_position);
@@ -472,9 +468,8 @@ int main(int argc, char ** argv){
 
         // write back to b
         // we only have to update cigar in b with std::vector<> cigar
-        uint32_t *cigar_ptr = bam_get_cigar(b);
-        uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*cigar.size());
-
+        uint32_t new_cigar_len = cigar.size()/2;
+        uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*new_cigar_len);
         for(auto it = cigar.begin(); it != cigar.end(); ++it) {
             uint32_t flag = *it;
             ++it;
@@ -484,7 +479,38 @@ int main(int argc, char ** argv){
 //            fprintf(stderr,"flag = %d length = %d new value = %d\n",flag,*it,*new_cigar_ptr);
             new_cigar_ptr++;
         }
-        b->core.n_cigar = cigar.size(); // cause error >> E::sam_format1_append] Corrupted aux data for read 20a4e805-b12b-410a-8cdf-d4d0046187dc
+//        fprintf(stderr,"l_data %d m_data %d l_qname+n_cigar+l_qseq+l_extranul %d\n",b->l_data, b->m_data,b->core.l_qname+b->core.n_cigar+b->core.l_qseq+b->core.l_extranul);
+//        fprintf(stderr,"l_data %d m_data %d l_qname+n_cigar+l_qseq+l_extranul %d\n",b->l_data, b->m_data,b->core.l_qname+b->core.n_cigar+b->core.l_qseq+b->core.l_extranul);
+
+        fprintf(stderr,"oldcigar=%d newcigar=%d l_data=%d m_data=%d l_qseq=%d\n",b->core.n_cigar, new_cigar_len,b->l_data, b->m_data,b->core.l_qseq);
+//        fprintf(stderr,"read = %s \n",read->qname);
+//        assert(new_cigar_len<=b->core.n_cigar);
+
+
+        // update b
+        uint32_t *cigar_ptr = bam_get_cigar(b);
+
+        // allocate memory for the new CIGAR
+        if (b->l_data + (new_cigar_len + 1) * 4 > b->m_data) { // not enough memory
+            b->m_data = b->l_data + new_cigar_len * 4;
+            kroundup32(b->m_data);
+            b->data = (uint8_t*)realloc(b->data, b->m_data);
+            cigar_ptr = bam_get_cigar(b); // after realloc, cigar may be changed
+            fprintf(stderr,"reallocated\n");
+        }
+
+        uint8_t *seq, *qual, *pointer;
+        seq = bam_get_seq(b); qual = bam_get_qual(b);
+        int j = b->core.l_qseq;
+        fprintf(stderr,"j=%d\n",j);
+//        memcpy(cigar_ptr, new_cigar_ptr, new_cigar_len * 4); // set CIGAR
+//        pointer = b->data + b->core.l_qname + new_cigar_len * 4;
+//        memmove(pointer, seq, (j+1)>>1); pointer += (j+1)>>1; // set SEQ
+//        memmove(pointer, qual, j); pointer += j; // set QUAL
+//        memmove(pointer, bam_get_aux(b), bam_get_l_aux(b)); pointer += bam_get_l_aux(b); // set optional fields
+//        b->core.n_cigar = new_cigar_len;
+//        b->core.l_qseq = j; // update CIGAR length and query length
+//        b->l_data = pointer - b->data; // update record length
 
         ret=sam_write1(out,header,b);
         errorCheck(ret);
