@@ -333,7 +333,7 @@ int main(int argc, char ** argv){
     int ARGS_START = 1;
     int ARGS_VERBORSE = 1;
     int ARGS_NORMALISE = 200;
-    char* ARGS_SAMFILE_IN = "SP1-mapped.bam";
+    char* ARGS_SAMFILE_IN = "samtools.bam";
     char* ARGS_SAMFILE_OUT = "trimmed.bam";
     char* ARGS_BEDFILE = "nCoV-2019.bed";
 
@@ -470,6 +470,7 @@ int main(int argc, char ** argv){
         // we only have to update cigar in b with std::vector<> cigar
         uint32_t new_cigar_len = cigar.size()/2;
         uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*new_cigar_len);
+        uint32_t *new_cigar = new_cigar_ptr;
         for(auto it = cigar.begin(); it != cigar.end(); ++it) {
             uint32_t flag = *it;
             ++it;
@@ -479,41 +480,44 @@ int main(int argc, char ** argv){
 //            fprintf(stderr,"flag = %d length = %d new value = %d\n",flag,*it,*new_cigar_ptr);
             new_cigar_ptr++;
         }
-//        fprintf(stderr,"l_data %d m_data %d l_qname+n_cigar+l_qseq+l_extranul %d\n",b->l_data, b->m_data,b->core.l_qname+b->core.n_cigar+b->core.l_qseq+b->core.l_extranul);
-//        fprintf(stderr,"l_data %d m_data %d l_qname+n_cigar+l_qseq+l_extranul %d\n",b->l_data, b->m_data,b->core.l_qname+b->core.n_cigar+b->core.l_qseq+b->core.l_extranul);
 
-        fprintf(stderr,"oldcigar=%d newcigar=%d l_data=%d m_data=%d l_qseq=%d\n",b->core.n_cigar, new_cigar_len,b->l_data, b->m_data,b->core.l_qseq);
-//        fprintf(stderr,"read = %s \n",read->qname);
-//        assert(new_cigar_len<=b->core.n_cigar);
-
-
-        // update b
-        uint32_t *cigar_ptr = bam_get_cigar(b);
+        fprintf(stderr,"l_data %d m_data %d l_qname+n_cigar+l_qseq+l_extranul %d\n",b->l_data, b->m_data,b->core.l_qname+b->core.n_cigar+b->core.l_qseq+b->core.l_extranul);
+        fprintf(stderr,"oldcigar %d newcigar %d\n",b->core.n_cigar, new_cigar_len);
+        //assert(new_cigar_len<=b->core.n_cigar);
+       
+        uint8_t *seq, *qual, *pointer;
+ 
+        bam1_t *b_dup = bam_dup1(b);
+        errorCheckNULL(b_dup);
 
         // allocate memory for the new CIGAR
         if (b->l_data + (new_cigar_len + 1) * 4 > b->m_data) { // not enough memory
-            b->m_data = b->l_data + new_cigar_len * 4;
-            kroundup32(b->m_data);
-            b->data = (uint8_t*)realloc(b->data, b->m_data);
-            cigar_ptr = bam_get_cigar(b); // after realloc, cigar may be changed
+            b_dup->m_data = b->l_data + new_cigar_len * 4;
+            kroundup32(b_dup->m_data);
+            b_dup->data = (uint8_t*)realloc(b_dup->data, b_dup->m_data);
             fprintf(stderr,"reallocated\n");
-        }
+        }        
 
-        uint8_t *seq, *qual, *pointer;
-        seq = bam_get_seq(b); qual = bam_get_qual(b);
+        seq = bam_get_seq(b); 
+        qual = bam_get_qual(b);
         int j = b->core.l_qseq;
-        fprintf(stderr,"j=%d\n",j);
-//        memcpy(cigar_ptr, new_cigar_ptr, new_cigar_len * 4); // set CIGAR
-//        pointer = b->data + b->core.l_qname + new_cigar_len * 4;
-//        memmove(pointer, seq, (j+1)>>1); pointer += (j+1)>>1; // set SEQ
-//        memmove(pointer, qual, j); pointer += j; // set QUAL
-//        memmove(pointer, bam_get_aux(b), bam_get_l_aux(b)); pointer += bam_get_l_aux(b); // set optional fields
-//        b->core.n_cigar = new_cigar_len;
-//        b->core.l_qseq = j; // update CIGAR length and query length
-//        b->l_data = pointer - b->data; // update record length
 
-        ret=sam_write1(out,header,b);
+        memcpy(bam_get_cigar(b_dup), new_cigar, new_cigar_len * 4); // set CIGAR
+        pointer = b_dup->data + b_dup->core.l_qname + new_cigar_len * 4;
+        memcpy(pointer, seq, (j+1)>>1); pointer += (j+1)>>1; // set SEQ 
+        memcpy(pointer, qual, j); pointer += j; // set QUAL
+        memcpy(pointer, bam_get_aux(b), bam_get_l_aux(b)); pointer += bam_get_l_aux(b); // set optional fields
+        b_dup->core.n_cigar = new_cigar_len;
+        // b->core.l_qseq = j; // update CIGAR length and query length
+        b_dup->l_data = pointer - b_dup->data; // update record length
+
+        b_dup->core.pos= read->pos;
+
+        ret=sam_write1(out,header,b_dup);
         errorCheck(ret);
+        
+        bam_destroy1(b_dup);
+
 //        free(new_cigar_ptr);
 
     }
