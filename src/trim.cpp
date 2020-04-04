@@ -474,6 +474,7 @@ int main(int argc, char ** argv){
         // we only have to update cigar in b with std::vector<> cigar
         uint32_t *cigar_ptr = bam_get_cigar(b);
         uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*cigar.size());
+        uint32_t *new_cigar = new_cigar_ptr;
 
         uint32_t new_cigar_len=0;
         for(auto it = cigar.begin(); it != cigar.end(); ++it) {
@@ -493,14 +494,13 @@ int main(int argc, char ** argv){
     // update b
        
         uint32_t l= new_cigar_len;
-        uint32_t *cigar2 = bam_get_cigar(b);
         uint8_t *seq, *qual, *pointer;
         seq = bam_get_seq(b); qual = bam_get_qual(b);
         int j = b->core.l_qseq;
 
-        memcpy(cigar2, cigar_ptr, l * 4); // set CIGAR
+        memcpy(cigar_ptr, new_cigar, l * 4); // set CIGAR
         pointer = b->data + b->core.l_qname + l * 4;
-        memmove(pointer, seq, (j+1)>>1); pointer += (j+1)>>1; // set SEQ
+        memmove(pointer, seq, (j+1)>>1); pointer += (j+1)>>1; // set SEQ 
         memmove(pointer, qual, j); pointer += j; // set QUAL
         memmove(pointer, bam_get_aux(b), bam_get_l_aux(b)); pointer += bam_get_l_aux(b); // set optional fields
         b->core.n_cigar = l, b->core.l_qseq = j; // update CIGAR length and query length
