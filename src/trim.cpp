@@ -18,6 +18,10 @@
 #include "common.h"
 
 std::set<std::string> pools;
+// consumesReference lookup for if a CIGAR operation consumes the reference sequence
+uint32_t consumeReference [] = {1,0,1,1,0,0,0,1};
+// consumesQuery lookup for if a CIGAR operation consumes the query sequence
+uint32_t consumesQuery [] = {1,1,0,0,1,0,0,1};
 
 
 static inline void strtok_null_check(char *tmp, int line_num){
@@ -223,107 +227,117 @@ int find_primer(std::vector<bed_row> bed, uint32_t pos, int direction) {
     return index;
 }
 
-int trim(std::vector<uint32_t>*cigar,alignedRead *read, int start_pos, int end) {
-    int pos;
-    if(end==0){
+int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int end) {
+    uint32_t pos;
+    if(end == 0){
         pos = read->pos;
         std::reverse(cigar->begin(),cigar->end()); // now it is easy to pop and append
     } else{
         pos = read->end;
     }
-//    fprintf(stderr,"pos = %d\n",pos);
-    int eaten = 0;
+
+    uint32_t eaten = 0;
 
 //    fprintf(stderr,"before while.... in read %s\n",read->qname);
-    int iter = 0;
+    uint32_t iter = 0;
     while(1){
         iter++;
         uint32_t flag;
         uint32_t length;
         // chomp stuff until we reach pos
-        if(end){
-            length = cigar->back();
-            cigar->pop_back();
-            flag = cigar->back();
-            cigar->pop_back();
-        }else{
-            flag = cigar->back();
-            cigar->pop_back();
-            length = cigar->back();
-            cigar->pop_back();
+        try {
+            if(end){
+                length = cigar->back();
+                cigar->pop_back();
+                flag = cigar->back();
+                cigar->pop_back();
+            }else{
+                flag = cigar->back();
+                cigar->pop_back();
+                length = cigar->back();
+                cigar->pop_back();
+            }
+        }catch (std::exception& e){
+            fprintf(stderr,"Ran out of cigar during soft masking - completely masked read will be ignored");
+            break;
         }
-//        fprintf(stderr,"flag = %d length = %d\n",flag,length);
-        if(flag == 0){
-            // match
-            eaten += length;
+
+// if the CIGAR operation consumes the reference sequence, increment/decrement the position by the CIGAR operation length
+        if(consumeReference[flag]){
             if(end == 0){
                 pos += length;
             } else{
                 pos -= length;
             }
         }
-        if(flag == 1){
-            // insertion to the ref
+// if the CIGAR operation consumes the query sequence, increment the number of CIGAR operations eaten by the CIGAR operation length
+        if(consumesQuery[flag]){
             eaten += length;
         }
-        if(flag == 2){
-            // deletion to the ref
-            if(end == 0){
-                pos += length;
-            }else{
-                pos -= length;
-            }
-        }
-        if(flag == 4){
-            eaten += length;
-        }
-        if(end == 0 and pos >= start_pos and flag == 0){
+// stop processing the CIGAR if we've gone far enough to mask the primer
+        if(end == 0 and pos >= primer_pos and flag == 0){
             break;
         }
-        if(end == 1 and pos <= start_pos and flag == 0){
+        if(end == 1 and pos <= primer_pos and flag == 0){
             break;
         }
     }
 //    fprintf(stderr,"after while.... in read %s iterations %d\n",read->qname,iter);
-    int extra = abs(pos-start_pos);
+    uint32_t extra = (pos > primer_pos)?pos-primer_pos:primer_pos-pos;
     if(extra){
-        // if flag ==0 // this is always true
-        cigar->push_back(0);
-        cigar->push_back(extra);
+        if(end){
+            cigar->push_back(0);
+            cigar->push_back(extra);
+        }else{
+            cigar->push_back(extra);
+            cigar->push_back(0);
+        }
         eaten -= extra;
     }
-    if(end==0){
+    // softmask the left primer
+    if(end == 0){
+        // update the position of the leftmost mappinng base
         read->pos = pos - extra;
-    }
-    if(end==0 and cigar->end()[-2]==2){
-        std::reverse(cigar->begin(),cigar->end()); // reverse cigar again
-        return 0;
-    }
+        // if proposed softmask leads straight into a deletion, shuffle leftmost mapping base along and ignore the deletion
+        if(cigar->back() == 2){
+            while(1){
+                uint32_t flag = cigar->back();
+                if(flag != 2){
+                    break;
+                }
+                cigar->pop_back();
+                uint32_t length = cigar->back();
+                cigar->pop_back();
+                read->pos += length;
+            }
+        }
+        // check the new CIGAR and replace the old one
+        if(eaten <= 0){
+            fprintf(stderr,"invalid cigar operation created - possibly due to INDEL in primer");
+            std::reverse(cigar->begin(),cigar->end()); // reverse cigar again
+            return 0;
+        }
+        cigar->push_back(eaten);
+        cigar->push_back(4);
 
-    if(end){
-        cigar->push_back(4);
+    } else{ // softmask the right primer
+        // check the new CIGAR and replace the old one
+        if(eaten <= 0){
+            fprintf(stderr,"invalid cigar operation created - possibly due to INDEL in primer");
+            return 0;
+        }
+        cigar->push_back(0);
         cigar->push_back(eaten);
-    }else{
-        cigar->push_back(eaten);
-        cigar->push_back(4);
     }
 
     // reverse cigar again
     if(end==0){
         std::reverse(cigar->begin(),cigar->end());
     }
-//    fprintf(stderr,"before returning\n");
     return 1;
 }
 
-int check_still_matching_bases(alignedRead *read) {
-    for (auto i=0 ;i < read->cigarLen; i++){
-        if(read->cigarOps[2*i] == 0){
-            return 1;
-        }
-    }
-    return 0;
-}
+
 
 /////////////////////////////////////////////////////////////////////MAIN//////////////////////////////////////////////////
 
@@ -333,7 +347,7 @@ int main(int argc, char ** argv){
     int ARGS_START = 1;
     int ARGS_VERBORSE = 1;
     int ARGS_NORMALISE = 200;
-    char* ARGS_SAMFILE_IN = "samtools.bam";
+    char* ARGS_SAMFILE_IN = "SP1-mapped.bam";
     char* ARGS_SAMFILE_OUT = "trimmed.bam";
     char* ARGS_BEDFILE = "nCoV-2019.bed";
 
@@ -376,23 +390,37 @@ int main(int argc, char ** argv){
 
     std::map<std::string,int[2]>counter;
 
-    FILE* fout = fopen("read_names.txt","w");
+    FILE* fout = fopen("find_primers_c.txt","w");
+
+    long no_bam_entries = 0;
+    long no_completed_entries = 0;
+    long no_unmapped_entries = 0;
+    long no_supp_entries = 0;
+    long no_incorrect_entries = 0;
+    long no_before_entries = 0;
+    long no_p1_entries = 0;
+    long no_p2_entries = 0;
 
     //repeat until all reads in the file are retrieved
     while ( sam_read1(in, header, b) >= 0){
+        no_bam_entries++;
+
         getRead(read, b);         //copy the current read to the myread structure. See common.c for information
 //        fprintf(fout,"%s\t%d\t%d\n",read->qname,read->cigarLen, sizeof(read->cigarOps)/ sizeof(uint32_t));
 //        continue;
         if(read->flag & BAM_FUNMAP){
 //            fprintf(stderr,"%s read is skipped because it is unmapped\n",read->qname);
+            no_unmapped_entries++;
             continue;
         }
         if(read->flag & BAM_FSUPPLEMENTARY){
 //            fprintf(stderr,"%s read is skipped because it is supplementary\n",read->qname);
+            no_supp_entries++;
             continue;
         }
         int p1 = find_primer(bed,read->pos,1);
         int p2 = find_primer(bed,read->end,-1);
+//        fprintf(fout,"%s\t%s\n",bed[p1].Primer_ID,bed[p2].Primer_ID);
 
 
         char* primer_left = strdup(bed[p1].Primer_ID);
@@ -403,45 +431,48 @@ int main(int argc, char ** argv){
         p = strstr(primer_right,"RIGHT");
         *p = '\0';
         int is_correctly_paired = strcmp(primer_left,primer_right); // return 0 if correctly paired
+//        fprintf(fout,"%d",is_correctly_paired?0:1);
 
         if(ARGS_REMOVE_INCORRECT_PAIRS==1 and is_correctly_paired!=0){
-            fprintf(fout,"%s\t%d\t%d\n",read->qname,read->cigarLen, sizeof(read->cigarOps)/ sizeof(uint32_t));
+            no_incorrect_entries++;
+//            fprintf(fout,"%s\t%d\t%d\n",read->qname,read->cigarLen, sizeof(read->cigarOps)/ sizeof(uint32_t));
             continue;
         }
-        std::vector<uint32_t> cigar(read->cigarOps, read->cigarOps + 2*read->cigarLen );
         //report
 //        fprintf(stderr,"%s\t%s\t%s\t%s_%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d",read->qname,read->pos,read->end,bed[p1].Primer_ID,bed[p2].Primer_ID,)
 
         // if the alignment starts before the end of the primer, trim to that position
-        uint32_t primer_position;
+        uint32_t p1_position;
+        uint32_t p2_position;
         if(ARGS_START){
-            primer_position = bed[p1].start;
+            p1_position = bed[p1].start;
+            p2_position = bed[p2].end;
+
         } else{
-            primer_position = bed[p1].end;
+            p1_position = bed[p1].end;
+            p2_position = bed[p2].start;
         }
-//        fprintf(stderr,"%s\t%d\t%d\t%d\t%d\n",read->qname,read->cigarLen, read->pos,primer_position,read->end);
-        if(read->pos < primer_position){
-            int trim_success = trim(&cigar, read, primer_position, 0);
+//        fprintf(fout,"%d\t%d\t%d\t%d\n",p1_position,p2_position,read->pos,read->end);
+        no_before_entries++;
+        std::vector<uint32_t> cigar(read->cigarOps, read->cigarOps + 2*read->cigarLen );
+        if(read->pos < p1_position){
+            no_p1_entries++;
+            int trim_success = trim(&cigar, read, p1_position, 0);
+//            fprintf(stderr,"%s\t%d\t%d\t%d\t%d\n",read->qname,read->cigarLen, read->pos,p1_position,read->end);
 //            break;
             if(trim_success == 0){
                 continue;
             }
         }
-        else{
-            if(ARGS_VERBORSE == 1){
-//                fprintf(stderr,"ref end %d >= primer_position %d\n",read->end,primer_position);
-            }
-        }
-
-        if(ARGS_START){
-            primer_position = bed[p2].end;
-        } else{
-            primer_position = bed[p2].start;
-        }
-        if(read->end > primer_position){
+//        fprintf(fout,"%d\t%d\t%d\t%d\n",p1_position,p2_position,read->pos,read->end);
+        if(read->end > p2_position){
+            no_p2_entries++;
             std::vector<uint32_t> cigar2(read->cigarOps, read->cigarOps + 2*read->cigarLen );
             cigar = cigar2;
-            trim(&cigar,read, primer_position, 1);
+            int trim_success = trim(&cigar,read, p2_position, 1);
+            if(trim_success == 0){
+                continue;
+            }
         }
         else{
             if(ARGS_VERBORSE){
@@ -462,12 +493,23 @@ int main(int argc, char ** argv){
             }
         }
 
+        // check the the alignment still contains bases matching the reference
+        int check_still_matching_bases(alignedRead *read) {
+            for (auto i=0 ;i < read->cigarLen; i++){
+                if(read->cigarOps[2*i] == 0){
+                    return 1;
+                }
+            }
+            return 0;
+        }
+
         if(check_still_matching_bases(read)==0){
             continue;
         }
+        no_completed_entries++;
 
         // write back to b
-        // we only have to update cigar in b with std::vector<> cigar
+        // we only have to update cigar in b with std::vector<> cigar and b->core.pos with read->pos
         uint32_t new_cigar_len = cigar.size()/2;
         uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*new_cigar_len);
         uint32_t *new_cigar = new_cigar_ptr;
@@ -481,8 +523,8 @@ int main(int argc, char ** argv){
             new_cigar_ptr++;
         }
 
-        fprintf(stderr,"l_data %d m_data %d l_qname+n_cigar+l_qseq+l_extranul %d\n",b->l_data, b->m_data,b->core.l_qname+b->core.n_cigar+b->core.l_qseq+b->core.l_extranul);
-        fprintf(stderr,"oldcigar %d newcigar %d\n",b->core.n_cigar, new_cigar_len);
+//        fprintf(stderr,"l_data %d m_data %d l_qname+n_cigar+l_qseq+l_extranul %d\n",b->l_data, b->m_data,b->core.l_qname+b->core.n_cigar+b->core.l_qseq+b->core.l_extranul);
+//        fprintf(stderr,"oldcigar %d newcigar %d\n",b->core.n_cigar, new_cigar_len);
         //assert(new_cigar_len<=b->core.n_cigar);
        
         uint8_t *seq, *qual, *pointer;
@@ -520,6 +562,7 @@ int main(int argc, char ** argv){
 
 //        free(new_cigar_ptr);
 
+
     }
 
     fclose(fout);
@@ -531,7 +574,15 @@ int main(int argc, char ** argv){
     sam_close(in);
     sam_close(out);
 
-    std::cout << "hello world" << std::endl;
+    std::cout << "C/C++" << std::endl;
+    std::cout << "no_of_bam_entries "<< no_bam_entries << std::endl;
+    std::cout << "no_unmapped_entries "<< no_unmapped_entries << std::endl;
+    std::cout << "no_supp_entries "<< no_supp_entries << std::endl;
+    std::cout << "no_incorrect_entries "<< no_incorrect_entries << std::endl;
+    std::cout << "no_before_entries "<< no_before_entries << std::endl;
+    std::cout << "no_p1_entries "<< no_p1_entries << std::endl;
+    std::cout << "no_p2_entries "<< no_p2_entries << std::endl;
+    std::cout << "no_completed_entries "<< no_completed_entries << std::endl;
 
     return 0;
 
