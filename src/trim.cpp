@@ -494,18 +494,13 @@ int main(int argc, char ** argv){
         }
 
         // check the the alignment still contains bases matching the reference
-        int check_still_matching_bases(alignedRead *read) {
-            for (auto i=0 ;i < read->cigarLen; i++){
-                if(read->cigarOps[2*i] == 0){
-                    return 1;
-                }
+        // TODO: cigarstring doesn't change after trim?
+        for (auto i=0 ;i < read->cigarLen; i++){
+            if(read->cigarOps[2*i] == 0){
+                continue;
             }
-            return 0;
         }
 
-        if(check_still_matching_bases(read)==0){
-            continue;
-        }
         no_completed_entries++;
 
         // write back to b
