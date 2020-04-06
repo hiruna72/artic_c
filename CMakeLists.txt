@@ -32,6 +32,8 @@ file(COPY test_files/nCoV-2019.bed
 		DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY test_files/samtools.bam
 		DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY test_files/SP1-mapped.bam
+		DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 set(trim src/trim.cpp)
 set(common src/common.cpp)

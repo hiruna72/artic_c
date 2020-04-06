@@ -12,17 +12,25 @@
 #include <map>
 #include <set>
 #include <algorithm>
-#include <3rdparty/htslib/sam.h>
 #include "artic.h"
 #include "htslib/sam.h"
 #include "common.h"
 
+long no_end_zero_entries = 0;
+long no_end_one_entries = 0;
 std::set<std::string> pools;
 // consumesReference lookup for if a CIGAR operation consumes the reference sequence
 uint32_t consumeReference [] = {1,0,1,1,0,0,0,1};
 // consumesQuery lookup for if a CIGAR operation consumes the query sequence
 uint32_t consumesQuery [] = {1,1,0,0,1,0,0,1};
 
+//make the segmentation faults a bit cool
+void sig_handler(int sig) {
+    fprintf(stderr,"I regret to inform that a segmentation fault occurred. But at least "
+          "it is better than a wrong answer%s",
+          ".");
+    exit(EXIT_FAILURE);
+}
 
 static inline void strtok_null_check(char *tmp, int line_num){
     // TODO: the file no is passed. have to change
@@ -194,12 +202,12 @@ std::vector<bed_row> read_bed_file(const char *bed_file_name) {
         }
     }
 
-    FILE* fout = fopen("bed_file_produced.txt","w");
-    for (auto it=bed_file.begin(); it!=bed_file.end(); ++it){
-//        std::cout << it->chromosome << it->start << it->end << it->Primer_ID << it->PoolName << it->direction << std::endl;
-        fprintf(fout,"%s\t%d\t%d\t%s\t%s\t%s\n",it->chromosome,it->start,it->end,it->Primer_ID,it->PoolName,it->direction);
-    }
-    fclose(fout);
+//    FILE* fout = fopen("bed_file_produced.txt","w");
+//    for (auto it=bed_file.begin(); it!=bed_file.end(); ++it){
+////        std::cout << it->chromosome << it->start << it->end << it->Primer_ID << it->PoolName << it->direction << std::endl;
+//        fprintf(fout,"%s\t%d\t%d\t%s\t%s\t%s\n",it->chromosome,it->start,it->end,it->Primer_ID,it->PoolName,it->direction);
+//    }
+//    fclose(fout);
     return bed_file;
 }
 
@@ -228,6 +236,7 @@ int find_primer(std::vector<bed_row> bed, uint32_t pos, int direction) {
 }
 
 int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int end) {
+
     uint32_t pos;
     if(end == 0){
         pos = read->pos;
@@ -245,7 +254,7 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
         uint32_t flag;
         uint32_t length;
         // chomp stuff until we reach pos
-        try {
+        if(cigar->size() >= 2){
             if(end){
                 length = cigar->back();
                 cigar->pop_back();
@@ -257,8 +266,8 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
                 length = cigar->back();
                 cigar->pop_back();
             }
-        }catch (std::exception& e){
-            fprintf(stderr,"Ran out of cigar during soft masking - completely masked read will be ignored");
+        }else{
+            fprintf(stderr,"Ran out of cigar during soft masking - completely masked read will be ignored\n");
             break;
         }
 
@@ -283,6 +292,9 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
         }
     }
 //    fprintf(stderr,"after while.... in read %s iterations %d\n",read->qname,iter);
+//    for(auto i = 0;i<cigar->size();i++){
+//        fprintf(stderr,"%u ",*(cigar->begin()+i));
+//    }
     uint32_t extra = (pos > primer_pos)?pos-primer_pos:primer_pos-pos;
     if(extra){
         if(end){
@@ -294,6 +306,7 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
         }
         eaten -= extra;
     }
+
     // softmask the left primer
     if(end == 0){
         // update the position of the leftmost mappinng base
@@ -326,14 +339,19 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
             fprintf(stderr,"invalid cigar operation created - possibly due to INDEL in primer");
             return 0;
         }
-        cigar->push_back(0);
+        cigar->push_back(4);
         cigar->push_back(eaten);
     }
 
     // reverse cigar again
     if(end==0){
         std::reverse(cigar->begin(),cigar->end());
+        no_end_zero_entries++;
+    }else{
+        no_end_one_entries++;
     }
+
+//    fprintf(stderr,"\n");
     return 1;
 }
 
@@ -343,13 +361,16 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
 
 int main(int argc, char ** argv){
     // args flags
-    int ARGS_REMOVE_INCORRECT_PAIRS = 1;
+    int ARGS_REMOVE_INCORRECT_PAIRS = 0;
     int ARGS_START = 1;
     int ARGS_VERBORSE = 1;
     int ARGS_NORMALISE = 200;
+    int ARGS_NO_READ_GROUPS = 0;
     char* ARGS_SAMFILE_IN = "SP1-mapped.bam";
     char* ARGS_SAMFILE_OUT = "trimmed.bam";
     char* ARGS_BEDFILE = "nCoV-2019.bed";
+
+    signal(SIGSEGV, sig_handler);
 
     std::vector<bed_row> bed = read_bed_file(ARGS_BEDFILE);
 
@@ -378,8 +399,7 @@ int main(int argc, char ** argv){
 
     //print the chromosome names in the header
     //see the bam_hdr_t struct in htslib/sam.h for parsing the rest of the stuff in header
-    int i;
-    for(i=0; i< (header->n_targets); i++){
+    for(auto i=0; i< (header->n_targets); i++){
         printf("Chromosome ID %d = %s\n",i,(header->target_name[i]));
     }
 
@@ -390,7 +410,7 @@ int main(int argc, char ** argv){
 
     std::map<std::string,int[2]>counter;
 
-    FILE* fout = fopen("find_primers_c.txt","w");
+    FILE* fout = fopen("C_details.txt","w");
 
     long no_bam_entries = 0;
     long no_completed_entries = 0;
@@ -430,10 +450,10 @@ int main(int argc, char ** argv){
         char* primer_right = strdup(bed[p2].Primer_ID);
         p = strstr(primer_right,"RIGHT");
         *p = '\0';
-        int is_correctly_paired = strcmp(primer_left,primer_right); // return 0 if correctly paired
+        int correctly_paired = (strcmp(primer_left,primer_right)==0)?1:0; // return 0 if correctly paired
 //        fprintf(fout,"%d",is_correctly_paired?0:1);
 
-        if(ARGS_REMOVE_INCORRECT_PAIRS==1 and is_correctly_paired!=0){
+        if(ARGS_REMOVE_INCORRECT_PAIRS==1 and correctly_paired == 0){
             no_incorrect_entries++;
 //            fprintf(fout,"%s\t%d\t%d\n",read->qname,read->cigarLen, sizeof(read->cigarOps)/ sizeof(uint32_t));
             continue;
@@ -454,12 +474,16 @@ int main(int argc, char ** argv){
         }
 //        fprintf(fout,"%d\t%d\t%d\t%d\n",p1_position,p2_position,read->pos,read->end);
         no_before_entries++;
+//        fprintf(stderr,"printing cigarOps..\n");
+//        for(auto i = 0;i<2*read->cigarLen;i++){
+//            fprintf(stderr,"%u ",read->cigarOps[i]);
+//        }
+//        fprintf(stderr,"\n");
+
         std::vector<uint32_t> cigar(read->cigarOps, read->cigarOps + 2*read->cigarLen );
         if(read->pos < p1_position){
             no_p1_entries++;
             int trim_success = trim(&cigar, read, p1_position, 0);
-//            fprintf(stderr,"%s\t%d\t%d\t%d\t%d\n",read->qname,read->cigarLen, read->pos,p1_position,read->end);
-//            break;
             if(trim_success == 0){
                 continue;
             }
@@ -467,8 +491,8 @@ int main(int argc, char ** argv){
 //        fprintf(fout,"%d\t%d\t%d\t%d\n",p1_position,p2_position,read->pos,read->end);
         if(read->end > p2_position){
             no_p2_entries++;
-            std::vector<uint32_t> cigar2(read->cigarOps, read->cigarOps + 2*read->cigarLen );
-            cigar = cigar2;
+//            std::vector<uint32_t> cigar2(read->cigarOps, read->cigarOps + 2*read->cigarLen );
+//            cigar = cigar2;
             int trim_success = trim(&cigar,read, p2_position, 1);
             if(trim_success == 0){
                 continue;
@@ -495,17 +519,25 @@ int main(int argc, char ** argv){
 
         // check the the alignment still contains bases matching the reference
         // TODO: cigarstring doesn't change after trim?
-        for (auto i=0 ;i < read->cigarLen; i++){
-            if(read->cigarOps[2*i] == 0){
+        uint32_t new_cigar_len = cigar.size()/2;
+
+        for (auto i=0 ;i < new_cigar_len; i++){
+            if(cigar[2*i] == 0){
                 continue;
             }
         }
 
         no_completed_entries++;
+//        for(auto i = 0; i < new_cigar_len; i++){
+//            fprintf(fout,"%u %u ",cigar[2*i],cigar[(2*i)+1]);
+//        }
+//        fprintf(fout,"\n");
+//        if(strcmp(read->qname,"56f34a88-5803-43fc-a906-b13dd2d1ca31")==0){
+//            break;
+//        }
 
         // write back to b
         // we only have to update cigar in b with std::vector<> cigar and b->core.pos with read->pos
-        uint32_t new_cigar_len = cigar.size()/2;
         uint32_t *new_cigar_ptr = (uint32_t*)malloc(sizeof(uint32_t)*new_cigar_len);
         uint32_t *new_cigar = new_cigar_ptr;
         for(auto it = cigar.begin(); it != cigar.end(); ++it) {
@@ -550,6 +582,26 @@ int main(int argc, char ** argv){
 
         b_dup->core.pos= read->pos;
 
+        std::string name("sth");
+
+
+//        TODO: modify header to include 'RG' tag and correct the code below
+//        if(ARGS_NO_READ_GROUPS == 0){
+//            if(correctly_paired){
+//                const char* pool_name = bed[p1].PoolName;
+//                int len = strlen(pool_name);
+//                const uint8_t* p = reinterpret_cast<const uint8_t*>(pool_name);
+//                bam_aux_append(b_dup,"RG",'Z',len,p);
+//            }else{
+//                const char* pool_name = "unmatched";
+//                int len = strlen(pool_name);
+//                const uint8_t* p = reinterpret_cast<const uint8_t*>(pool_name);
+//                bam_aux_append(b_dup,"RG",'Z',len,p);
+//            }
+//        }
+
+
+
         ret=sam_write1(out,header,b_dup);
         errorCheck(ret);
         
@@ -576,7 +628,9 @@ int main(int argc, char ** argv){
     std::cout << "no_incorrect_entries "<< no_incorrect_entries << std::endl;
     std::cout << "no_before_entries "<< no_before_entries << std::endl;
     std::cout << "no_p1_entries "<< no_p1_entries << std::endl;
+    std::cout << "no_end_zero_entries "<< no_end_zero_entries << std::endl;
     std::cout << "no_p2_entries "<< no_p2_entries << std::endl;
+    std::cout << "no_end_one_entries "<< no_end_one_entries << std::endl;
     std::cout << "no_completed_entries "<< no_completed_entries << std::endl;
 
     return 0;
