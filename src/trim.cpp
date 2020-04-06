@@ -349,8 +349,13 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
     return 1;
 }
 
+// TODO Add short description to OPTIONS
 static const char *ARTIC_C_USAGE_MESSAGE =
-        "Usage: artic_c -r -s -n -g [threshold] -b [bed file] -i [input samfile] -o [output samfile]";
+        "Usage: artic_c [OPTIONS] -b [bed file] -i [input samfile] -o [output samfile]\n"
+        "   -n  INT\n"
+        "   -r\n"
+        "   -s\n"
+        "   -g\n";
 
 /////////////////////////////////////////////////////////////////////MAIN//////////////////////////////////////////////////
 
@@ -360,23 +365,25 @@ int main(int argc, char ** argv){
 
     // args flags
     int ARGS_REMOVE_INCORRECT_PAIRS = 0;
-    int ARGS_START = 1;
+    int ARGS_START = 0;
     int ARGS_VERBORSE = 1;
     int ARGS_NORMALISE = 200;
     int ARGS_NO_READ_GROUPS = 0;
-    char* ARGS_SAMFILE_IN = "SP1-mapped.bam";
-    char* ARGS_SAMFILE_OUT = "trimmed.bam";
-    char* ARGS_BEDFILE = "nCoV-2019.bed";
+    char* ARGS_SAMFILE_IN = NULL;
+    char* ARGS_SAMFILE_OUT = NULL;
+    char* ARGS_BEDFILE = NULL;
+
+    const char* optstring = "grsn:b:i:o:";
 
     if(argc == 1){
         fprintf (stderr, "%s", ARTIC_C_USAGE_MESSAGE);
         exit(EXIT_FAILURE);
     }
     int c;
-    while ((c = getopt (argc, argv, "r:s:n:g:b:i:o")) != -1)
+    while ((c = getopt (argc, argv, optstring)) != -1)
         switch (c) {
             case 'r':
-                ARGS_REMOVE_INCORRECT_PAIRS = atoi(optarg);
+                ARGS_REMOVE_INCORRECT_PAIRS = 1;
                 break;
             case 's':
                 ARGS_START = 1;
@@ -388,18 +395,23 @@ int main(int argc, char ** argv){
                 ARGS_NO_READ_GROUPS = 1;
                 break;
             case 'b':
-//                ARGS_BEDFILE = optarg;
+                ARGS_BEDFILE = optarg;
                 break;
             case 'i':
-//                ARGS_SAMFILE_IN = optarg;
+                ARGS_SAMFILE_IN = optarg;
                 break;
             case 'o':
-//                ARGS_SAMFILE_OUT = optarg;
+                ARGS_SAMFILE_OUT = optarg;
                 break;
             default:
                 fprintf (stderr, "%s", ARTIC_C_USAGE_MESSAGE);
                 exit(EXIT_FAILURE);
         }
+
+    if (ARGS_BEDFILE == NULL || ARGS_SAMFILE_IN == NULL || ARGS_SAMFILE_OUT == NULL) {
+        fprintf(stderr, "%s", ARTIC_C_USAGE_MESSAGE);
+        exit(EXIT_FAILURE);
+    }
 
     std::vector<bed_row> bed = read_bed_file(ARGS_BEDFILE);
 
