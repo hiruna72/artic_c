@@ -28,16 +28,8 @@ include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/3rdparty)
 
-file(COPY test_files/nCoV-2019.bed
-		DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-file(COPY test_files/samtools.bam
-		DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-file(COPY test_files/SP1-mapped.bam
-		DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-
 set(trim src/trim.cpp)
 set(common src/common.cpp)
-
 
 # Build a shared lib
 add_executable(artic_c ${common} ${trim})
@@ -45,7 +37,6 @@ add_executable(artic_c ${common} ${trim})
 # htslib dependency
 set (htslib_shared "${PROJECT_SOURCE_DIR}/3rdparty/${DEPLOY_PLATFORM}/libhts.so")
 
-#
 IF (${DEPLOY_PLATFORM} STREQUAL "x86")
 	target_link_libraries(artic_c -lz -ldl -lm -lpthread ${htslib_shared})
 ELSE()

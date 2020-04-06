@@ -364,37 +364,37 @@ int main(int argc, char ** argv){
     int ARGS_VERBORSE = 1;
     int ARGS_NORMALISE = 200;
     int ARGS_NO_READ_GROUPS = 0;
-    char* ARGS_SAMFILE_IN;
-    char* ARGS_SAMFILE_OUT;
-    char* ARGS_BEDFILE;
+    char* ARGS_SAMFILE_IN = "SP1-mapped.bam";
+    char* ARGS_SAMFILE_OUT = "trimmed.bam";
+    char* ARGS_BEDFILE = "nCoV-2019.bed";
 
     if(argc == 1){
         fprintf (stderr, "%s", ARTIC_C_USAGE_MESSAGE);
         exit(EXIT_FAILURE);
     }
     int c;
-    while ((c = getopt (argc, argv, "s:n:g:b:i:o:r")) != -1)
+    while ((c = getopt (argc, argv, "r:s:n:g:b:i:o")) != -1)
         switch (c) {
             case 'r':
-                ARGS_REMOVE_INCORRECT_PAIRS = 1;
+                ARGS_REMOVE_INCORRECT_PAIRS = atoi(optarg);
                 break;
             case 's':
                 ARGS_START = 1;
                 break;
             case 'n':
-                ARGS_NORMALISE = 1;
+                ARGS_NORMALISE = atoi(optarg);
                 break;
             case 'g':
                 ARGS_NO_READ_GROUPS = 1;
                 break;
             case 'b':
-                ARGS_BEDFILE = optarg;
+//                ARGS_BEDFILE = optarg;
                 break;
             case 'i':
-                ARGS_SAMFILE_IN = optarg;
+//                ARGS_SAMFILE_IN = optarg;
                 break;
             case 'o':
-                ARGS_SAMFILE_OUT = optarg;
+//                ARGS_SAMFILE_OUT = optarg;
                 break;
             default:
                 fprintf (stderr, "%s", ARTIC_C_USAGE_MESSAGE);
