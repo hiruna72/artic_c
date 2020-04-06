@@ -15,6 +15,7 @@
 #include "artic.h"
 #include "htslib/sam.h"
 #include "common.h"
+#include "misc.h"
 
 //long no_end_zero_entries = 0;
 //long no_end_one_entries = 0;
@@ -361,6 +362,8 @@ static const char *ARTIC_C_USAGE_MESSAGE =
 
 int main(int argc, char ** argv){
 
+    double realtime0 = realtime();
+
     signal(SIGSEGV, sig_handler);
 
     // args flags
@@ -626,6 +629,9 @@ int main(int argc, char ** argv){
 //    std::cout << "no_p2_entries "<< no_p2_entries << std::endl;
 //    std::cout << "no_end_one_entries "<< no_end_one_entries << std::endl;
 //    std::cout << "no_completed_entries "<< no_completed_entries << std::endl;
+
+    fprintf(stderr, "[%s] Real time: %.3f sec; CPU time: %.3f sec; Peak RAM: %.3f GB\n\n",
+         __func__, realtime() - realtime0, cputime(),peakrss() / 1024.0 / 1024.0 / 1024.0);
 
     return 0;
 
