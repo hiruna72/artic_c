@@ -17,6 +17,9 @@
 #include "common.h"
 #include "misc.h"
 
+// default verbosity
+int ARGS_VERBORSE = 0;
+
 //long no_end_zero_entries = 0;
 //long no_end_one_entries = 0;
 std::set<std::string> pools;
@@ -267,7 +270,9 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
                 cigar->pop_back();
             }
         }else{
-            fprintf(stderr,"Ran out of cigar during soft masking - completely masked read will be ignored\n");
+            if (ARGS_VERBORSE == 1) {
+                fprintf(stderr,"Ran out of cigar during soft masking - completely masked read will be ignored\n");
+            }
             break;
         }
 
@@ -356,7 +361,8 @@ static const char *ARTIC_C_USAGE_MESSAGE =
         "   -n  INT\n"
         "   -r\n"
         "   -s\n"
-        "   -g\n";
+        "   -g\n"
+        "   -v  Show Verbose logs\n";
 
 /////////////////////////////////////////////////////////////////////MAIN//////////////////////////////////////////////////
 
@@ -369,14 +375,13 @@ int main(int argc, char ** argv){
     // args flags
     int ARGS_REMOVE_INCORRECT_PAIRS = 0;
     int ARGS_START = 0;
-    int ARGS_VERBORSE = 1;
     int ARGS_NORMALISE = 200;
     int ARGS_NO_READ_GROUPS = 0;
     char* ARGS_SAMFILE_IN = NULL;
     char* ARGS_SAMFILE_OUT = NULL;
     char* ARGS_BEDFILE = NULL;
 
-    const char* optstring = "grsn:b:i:o:";
+    const char* optstring = "grsvn:b:i:o:";
 
     if(argc == 1){
         fprintf (stderr, "%s", ARTIC_C_USAGE_MESSAGE);
@@ -396,6 +401,9 @@ int main(int argc, char ** argv){
                 break;
             case 'g':
                 ARGS_NO_READ_GROUPS = 1;
+                break;
+            case 'v':
+                ARGS_VERBORSE = 1;
                 break;
             case 'b':
                 ARGS_BEDFILE = optarg;
@@ -464,12 +472,16 @@ int main(int argc, char ** argv){
 
         getRead(read, b);         //copy the current read to the myread structure. See common.c for information
         if(read->flag & BAM_FUNMAP){
-            fprintf(stderr,"%s read is skipped because it is unmapped\n",read->qname);
+            if (ARGS_VERBORSE == 1) {
+                fprintf(stderr,"%s read is skipped because it is unmapped\n",read->qname);
+            }
 //            no_unmapped_entries++;
             continue;
         }
         if(read->flag & BAM_FSUPPLEMENTARY){
-            fprintf(stderr,"%s read is skipped because it is supplementary\n",read->qname);
+            if (ARGS_VERBORSE == 1) {
+                fprintf(stderr,"%s read is skipped because it is supplementary\n",read->qname);
+            }
 //            no_supp_entries++;
             continue;
         }
@@ -491,7 +503,9 @@ int main(int argc, char ** argv){
             continue;
         }
         //report
-        fprintf(stderr,"%s\t%d\t%d\t%s\t%s\n",read->qname,read->pos,read->end,bed[p1].Primer_ID,bed[p2].Primer_ID);
+        if (ARGS_VERBORSE == 1) {
+            fprintf(stderr,"%s\t%d\t%d\t%s\t%s\n",read->qname,read->pos,read->end,bed[p1].Primer_ID,bed[p2].Primer_ID);
+        }
 
         // if the alignment starts before the end of the primer, trim to that position
         uint32_t p1_position;
@@ -569,8 +583,10 @@ int main(int argc, char ** argv){
             b_dup->m_data = b->l_data + new_cigar_len * 4;
             kroundup32(b_dup->m_data);
             b_dup->data = (uint8_t*)realloc(b_dup->data, b_dup->m_data);
-            fprintf(stderr,"reallocated\n");
-        }        
+            if (ARGS_VERBORSE == 1){
+                fprintf(stderr,"reallocated\n");
+            }
+        }
 
         seq = bam_get_seq(b); 
         qual = bam_get_qual(b);
