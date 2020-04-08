@@ -32,7 +32,8 @@ set(trim src/trim.cpp)
 set(common src/common.cpp)
 
 # Build a shared lib
-add_executable(artic_c ${common} ${trim})
+#add_executable(artic_c ${common} ${trim})
+add_library(artic_c SHARED ${common} ${trim})
 
 # htslib dependency
 set (htslib_shared "${PROJECT_SOURCE_DIR}/3rdparty/${DEPLOY_PLATFORM}/libhts.so")
