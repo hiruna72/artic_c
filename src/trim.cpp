@@ -240,14 +240,14 @@ int find_primer(std::vector<bed_row> bed, uint32_t pos, int direction) {
     return index;
 }
 
-int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int end) {
+int trim(std::vector<uint32_t>*cigar,bam1_t *b, uint32_t end_pos,uint32_t primer_pos, int end) {
 
     uint32_t pos;
     if(end == 0){
-        pos = read->pos;
+        pos = b->core.pos;
         std::reverse(cigar->begin(),cigar->end()); // now it is easy to pop and append
     } else{
-        pos = read->end;
+        pos = end_pos;
     }
 
     uint32_t eaten = 0;
@@ -312,7 +312,7 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
     // softmask the left primer
     if(end == 0){
         // update the position of the leftmost mappinng base
-        read->pos = pos - extra;
+        b->core.pos = pos - extra;
         // if proposed softmask leads straight into a deletion, shuffle leftmost mapping base along and ignore the deletion
         if(cigar->back() == 2){
             while(1){
@@ -323,7 +323,7 @@ int trim(std::vector<uint32_t>*cigar,alignedRead *read, uint32_t primer_pos, int
                 cigar->pop_back();
                 uint32_t length = cigar->back();
                 cigar->pop_back();
-                read->pos += length;
+                b->core.pos += length;
             }
         }
         // check the new CIGAR and replace the old one
@@ -453,7 +453,7 @@ int main(int argc, char ** argv){
     b = bam_init1();
 
     //my structure for a read (see common.h)
-    struct alignedRead* read = (struct alignedRead*)malloc(sizeof(struct alignedRead));
+//    struct alignedRead* read = (struct alignedRead*)malloc(sizeof(struct alignedRead));
 
     std::map<std::string,int[2]>counter;
 
@@ -470,23 +470,24 @@ int main(int argc, char ** argv){
     while ( sam_read1(in, header, b) >= 0){
 //        no_bam_entries++;
 
-        getRead(read, b);         //copy the current read to the myread structure. See common.c for information
-        if(read->flag & BAM_FUNMAP){
+//        getRead(read, b);         //copy the current read to the myread structure. See common.c for information
+        bam1_core_t *c = &(b->core);
+        if(c->flag & BAM_FUNMAP){
             if (ARGS_VERBORSE == 1) {
-                fprintf(stderr,"%s read is skipped because it is unmapped\n",read->qname);
+                fprintf(stderr,"%s read is skipped because it is unmapped\n",bam_get_qname(b));
             }
 //            no_unmapped_entries++;
             continue;
         }
-        if(read->flag & BAM_FSUPPLEMENTARY){
+        if(c->flag & BAM_FSUPPLEMENTARY){
             if (ARGS_VERBORSE == 1) {
-                fprintf(stderr,"%s read is skipped because it is supplementary\n",read->qname);
+                fprintf(stderr,"%s read is skipped because it is supplementary\n",bam_get_qname(b));
             }
 //            no_supp_entries++;
             continue;
         }
-        int p1 = find_primer(bed,read->pos,1);
-        int p2 = find_primer(bed,read->end,-1);
+        int p1 = find_primer(bed,c->pos,1);
+        int p2 = find_primer(bed,bam_endpos(b),-1);
 
         char* primer_left = strdup(bed[p1].Primer_ID);
         char * p = strstr(primer_left,"LEFT");
@@ -499,12 +500,14 @@ int main(int argc, char ** argv){
 
         if(ARGS_REMOVE_INCORRECT_PAIRS==1 and correctly_paired == 0){
 //            no_incorrect_entries++;
-            fprintf(stderr,"%s skipped as not correctly paired\n",read->qname);
+            if (ARGS_VERBORSE == 1) {
+                fprintf(stderr, "%s skipped as not correctly paired\n", bam_get_qname(b));
+            }
             continue;
         }
         //report
         if (ARGS_VERBORSE == 1) {
-            fprintf(stderr,"%s\t%d\t%d\t%s\t%s\n",read->qname,read->pos,read->end,bed[p1].Primer_ID,bed[p2].Primer_ID);
+            fprintf(stderr,"%s\t%ld\t%ld\t%s\t%s\n",bam_get_qname(b),c->pos,bam_endpos(b),bed[p1].Primer_ID,bed[p2].Primer_ID);
         }
 
         // if the alignment starts before the end of the primer, trim to that position
@@ -520,17 +523,27 @@ int main(int argc, char ** argv){
         }
 //        no_before_entries++;
 
-        std::vector<uint32_t> cigar(read->cigarOps, read->cigarOps + 2*read->cigarLen );
-        if(read->pos < p1_position){
+        std::vector<uint32_t> cigar;
+        uint32_t *original_cigar = bam_get_cigar(b);
+        for(auto i = 0; i < c->n_cigar; i++){
+            uint32_t cigarFlag     = bam_cigar_op(original_cigar[i]);
+            uint32_t cigarFlagLen  = bam_cigar_oplen(original_cigar[i]);
+            cigar.push_back(cigarFlag);
+            cigar.push_back(cigarFlagLen);
+        }
+        uint32_t end_pos = bam_endpos(b);
+
+        if(c->pos < p1_position){
 //            no_p1_entries++;
-            int trim_success = trim(&cigar, read, p1_position, 0);
+            int trim_success = trim(&cigar, b,end_pos, p1_position, 0);
             if(trim_success == 0){
                 continue;
             }
         }
-        if(read->end > p2_position){
+
+        if(end_pos > p2_position){
 //            no_p2_entries++;
-            int trim_success = trim(&cigar,read, p2_position, 1);
+            int trim_success = trim(&cigar,b,end_pos, p2_position, 1);
             if(trim_success == 0){
                 continue;
             }
@@ -541,7 +554,7 @@ int main(int argc, char ** argv){
             char key[100];
             strcpy (key,bed[p1].Primer_ID);
             strcat(key,bed[p2].Primer_ID);
-            int index = (read->flag & BAM_FREVERSE) ? 1:0;
+            int index = (c->flag & BAM_FREVERSE) ? 1:0;
             counter[key][index]++;
             if(counter[key][index] > ARGS_NORMALISE){
                 continue;
@@ -601,7 +614,7 @@ int main(int argc, char ** argv){
         // b->core.l_qseq = j; // update CIGAR length and query length
         b_dup->l_data = pointer - b_dup->data; // update record length
 
-        b_dup->core.pos= read->pos;
+        b_dup->core.pos= c->pos;
 
 //        TODO: modify header to include 'RG' tag and correct the code below
 //        if(ARGS_NO_READ_GROUPS == 0){
@@ -628,7 +641,7 @@ int main(int argc, char ** argv){
     }
 
     //wrap up
-    free(read);
+//    free(read);
     bam_destroy1(b);
     bam_hdr_destroy(header);
     sam_close(in);
