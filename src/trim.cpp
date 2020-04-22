@@ -29,13 +29,7 @@ uint32_t consumeReference [] = {1,0,1,1,0,0,0,1};
 // consumesQuery lookup for if a CIGAR operation consumes the query sequence
 uint32_t consumesQuery [] = {1,1,0,0,1,0,0,1};
 
-//make the segmentation faults a bit cool
-void sig_handler(int sig) {
-    fprintf(stderr,"I regret to inform that a segmentation fault occurred. But at least "
-          "it is better than a wrong answer%s",
-          ".");
-    exit(EXIT_FAILURE);
-}
+
 
 static inline void strtok_null_check(char *tmp, int line_num){
     // TODO: the file no is passed. have to change
@@ -357,7 +351,7 @@ int trim(std::vector<uint32_t>*cigar,bam1_t *b, uint32_t end_pos,uint32_t primer
 
 // TODO Add short description to OPTIONS
 static const char *ARTIC_C_USAGE_MESSAGE =
-        "Usage: artic_c [OPTIONS] -b [bed file] -i [input samfile] -o [output samfile]\n"
+        "Usage: artic_c trim [OPTIONS] -b [bed file] -i [input samfile] -o [output samfile]\n"
         "   -n  INT\n"
         "   -r\n"
         "   -s\n"
@@ -366,11 +360,11 @@ static const char *ARTIC_C_USAGE_MESSAGE =
 
 /////////////////////////////////////////////////////////////////////MAIN//////////////////////////////////////////////////
 
-int main(int argc, char ** argv){
+int trim_main(int argc, char ** argv){
 
-    double realtime0 = realtime();
-
-    signal(SIGSEGV, sig_handler);
+//    double realtime0 = realtime();
+//
+//    signal(SIGSEGV, sig_handler);
 
     // args flags
     int ARGS_REMOVE_INCORRECT_PAIRS = 0;
@@ -659,11 +653,13 @@ int main(int argc, char ** argv){
 //    std::cout << "no_end_one_entries "<< no_end_one_entries << std::endl;
 //    std::cout << "no_completed_entries "<< no_completed_entries << std::endl;
 
-    fprintf(stderr, "[%s] Real time: %.3f sec; CPU time: %.3f sec; Peak RAM: %.3f GB\n\n",
-         __func__, realtime() - realtime0, cputime(),peakrss() / 1024.0 / 1024.0 / 1024.0);
+//    fprintf(stderr, "[%s] Real time: %.3f sec; CPU time: %.3f sec; Peak RAM: %.3f GB\n\n",
+//         __func__, realtime() - realtime0, cputime(),peakrss() / 1024.0 / 1024.0 / 1024.0);
 
     return 0;
 
 
 
 }
+
+// trim -n 200 -g -b ../test_files/nCoV-2019.bed -i ../test_files/SP1-mapped.bam -o trimmed.bam
