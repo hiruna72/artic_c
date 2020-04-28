@@ -39,8 +39,8 @@ set(genomefile src/multiIntersectBed/GenomeFile/GenomeFile.cpp)
 set(gzstream src/multiIntersectBed/gzstream/gzstream.C)
 set(filetype src/multiIntersectBed/fileType/fileType.cpp)
 # Build a shared lib
-add_executable(artic_c ${main} ${trim} ${mask} ${multiintersct_main} ${multiintersct} ${bedfile} ${genomefile} ${gzstream} ${filetype})
-#add_library(artic_c SHARED ${common} ${trim})
+#add_executable(artic_c ${main} ${trim} ${mask} ${multiintersct_main} ${multiintersct} ${bedfile} ${genomefile} ${gzstream} ${filetype})
+add_library(artic_c SHARED ${main} ${trim} ${mask} ${multiintersct_main} ${multiintersct} ${bedfile} ${genomefile} ${gzstream} ${filetype})
 
 # htslib dependency
 set (htslib_shared "${PROJECT_SOURCE_DIR}/3rdparty/${DEPLOY_PLATFORM}/libhts.so")
@@ -50,3 +50,10 @@ IF (${DEPLOY_PLATFORM} STREQUAL "x86")
 ELSE()
 	target_link_libraries(artic_c -lz -ldl -lm ${htslib_shared})
 ENDIF()
+
+#  compile init_artic_example and link to shared lib
+# Create the executable
+add_executable(artic_example examples/init_artic_example.cpp)
+
+# Link the required libraries
+target_link_libraries(artic_example artic_c ${htslib_shared})

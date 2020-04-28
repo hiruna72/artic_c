@@ -11,6 +11,7 @@
 #include "error.h"
 #include "assert.h"
 #include "multiIntersectBed/multiIntersectBed.h"
+#include "interface_artic_c.h"
 
 #define ARTIC_C_VERSION "0.1"
 
@@ -47,7 +48,7 @@ int print_usage(FILE *fp_help){
 }
 
 
-int main(int argc, char ** argv){
+int init_artic(int argc, char **argv){
 
     double realtime0 = realtime();
 
