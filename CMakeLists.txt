@@ -26,14 +26,20 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -rdynamic -Wall -O2 -std=c++11 ")
 
 include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/src)
+include_directories(${PROJECT_SOURCE_DIR}/src/multiIntersectBed)
 include_directories(${PROJECT_SOURCE_DIR}/3rdparty)
 
 set(trim src/trim.cpp)
 set(main src/main.cpp)
 set(mask src/mask.cpp)
-
+set(multiintersct_main src/multiIntersectBed/multiIntersectBedMain.cpp)
+set(multiintersct src/multiIntersectBed/multiIntersectBed.cpp)
+set(bedfile src/multiIntersectBed/bedFile/bedFile.cpp)
+set(genomefile src/multiIntersectBed/GenomeFile/GenomeFile.cpp)
+set(gzstream src/multiIntersectBed/gzstream/gzstream.C)
+set(filetype src/multiIntersectBed/fileType/fileType.cpp)
 # Build a shared lib
-add_executable(artic_c ${main} ${trim} ${mask})
+add_executable(artic_c ${main} ${trim} ${mask} ${multiintersct_main} ${multiintersct} ${bedfile} ${genomefile} ${gzstream} ${filetype})
 #add_library(artic_c SHARED ${common} ${trim})
 
 # htslib dependency

@@ -10,8 +10,9 @@
 #include "misc.h"
 #include "error.h"
 #include "assert.h"
+#include "multiIntersectBed/multiIntersectBed.h"
 
-#define F5C_VERSION "0.1"
+#define ARTIC_C_VERSION "0.1"
 
 //make the segmentation faults a bit cool
 void sig_handler(int sig) {
@@ -22,13 +23,14 @@ void sig_handler(int sig) {
 }
 int trim_main(int argc, char ** argv);
 int mask_main(int argc, char ** argv);
-
+int multiintersect_main(int argc, char* argv[]); // since bedtools is big, copied only the mutliintersect part and necessary utils
 
 int print_usage(FILE *fp_help){
 
     fprintf(fp_help,"Usage: artic_c <command> [options]\n\n");
     fprintf(fp_help,"command:\n");
     fprintf(fp_help,"         trim    downsize dataset by trimming alignments\n");
+    fprintf(fp_help,"         multiinter    merge bedfiles (copied from bedtools multiintersect)\n");
     fprintf(fp_help,"         mask    create a bed file containing bases with lower depth\n\n");
 
     if(fp_help==stderr){
@@ -62,8 +64,11 @@ int main(int argc, char ** argv){
     else if(strcmp(argv[1],"mask")==0){
         ret=mask_main(argc-1, argv+1);
     }
+    else if(strcmp(argv[1],"multiinter")==0){
+        ret=multiintersect_main(argc-1, argv+1);
+    }
     else if(strcmp(argv[1],"--version")==0 || strcmp(argv[1],"-V")==0){
-        fprintf(stdout,"ARTIC_C %s\n",F5C_VERSION);
+        fprintf(stdout,"ARTIC_C %s\n",ARTIC_C_VERSION);
         exit(EXIT_SUCCESS);
     }
     else if(strcmp(argv[1],"--help")==0 || strcmp(argv[1],"-h")==0){
