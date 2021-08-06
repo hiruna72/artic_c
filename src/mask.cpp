@@ -90,8 +90,8 @@ int mask_main(int argc, char ** argv){
         line++;
     }
 
-
-    fprintf(stderr,"hellow mask\n");
+    fclose(fout);
+    fprintf(stderr, "\n[%s] Artic Mask completed successfully\n", __func__);
     return 0;
 
 }
